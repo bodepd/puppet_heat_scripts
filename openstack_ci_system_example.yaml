@@ -1,0 +1,68 @@
+heat_template_version: 2013-05-23
+
+parameters:
+  key_name:
+    type: string
+    description: Name of keypair to assign to servers
+    default: openstack_ssh_key
+  image_name:
+    type: string
+    description: Name of image to use
+    # on rackspace, ubuntu does not work by default, you gotta install setuptools and
+    # create your own image
+    default: ready_ubuntu
+  puppet_repo:
+    type: string
+    description: name of repo to download
+
+resources:
+  jenkins_server:
+    type: OS::Nova::Server
+    properties:
+      name: Jenkins server
+      flavor: 1 GB Performance
+      image: { get_param: image_name }
+      key_name: { get_param: key_name }
+      config_drive: "True"
+      user_data:
+        str_replace:
+          template: { get_file: heat_puppet_userdata.sh }
+          params:
+            $PUPPET_REPO: { get_param: puppet_repo }
+            # this just works, you can just set any facts that you want as params
+            $FACTS: 'role=jenkinsserver'
+            # this is a magic variable
+            $USER_HIERA_YAML: { get_file: jenkins_server.yaml }
+
+  jenkins_client:
+    type: OS::Nova::Server
+    properties:
+      name: Jenkins Client
+      flavor: 1 GB Performance
+      image: { get_param: image_name }
+      key_name: { get_param: key_name }
+      config_drive: "True"
+      user_data:
+        str_replace:
+          template: { get_file: heat_puppet_userdata.sh }
+          params:
+            $PUPPET_REPO: { get_param: puppet_repo }
+            # this just works, you can just set any facts that you want as params
+            $FACTS: 'role=jenkinsclient'
+            # specify the name of a file that you want to pass in as user_data
+            $USER_HIERA_YAML: { get_file: jenkins_client.yaml }
+            # here you can specify any additional hiera variables that need to use
+            # variables only available through heat
+            $CONNECTION_HIERA_OVERRIDES:
+              str_replace:
+                template: "jenkins_server: $CONN"
+                params:
+                  $CONN: { get_attr: [ jenkins_server, networks, private, 0 ] }
+
+outputs:
+  jenkins_server_public_ip:
+    description: public IP address of jenkins server
+    value: { get_attr: [jenkins_server, accessIPv5] }
+  jenkins_client_private_ip:
+    description: public IP of jenkins client
+    value: { get_attr: [jenkins_client, accessIPv4] }
