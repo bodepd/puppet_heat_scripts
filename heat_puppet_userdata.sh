@@ -12,7 +12,9 @@ apt-key adv --recv-key --keyserver pool.sks-keyservers.net 4BD6EC30
 echo "deb http://apt.puppetlabs.com precise main" > /etc/apt/sources.list.d/puppetlabs.list
 echo "deb http://apt.puppetlabs.com precise dependencies" >> /etc/apt/sources.list.d/puppetlabs.list
 apt-get update
-apt-get -y install puppet ruby1.9.1-full git
+apt-get -y install puppet ruby1.9.1-full git rubygems vim
+update-alternatives --set ruby /usr/bin/ruby1.9.1
+update-alternatives --set gem /usr/bin/gem1.9.1
 # install librarian-puppet-simple. I would be using r10k, but it just seemed to result
 # in stack traces, happy to switch once I can get it working
 gem install librarian-puppet-simple
