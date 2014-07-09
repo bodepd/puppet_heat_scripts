@@ -1,0 +1,142 @@
+heat_template_version: 2013-05-23
+
+parameters:
+  key_name:
+    type: string
+    description: Name of keypair to assign to servers
+    default: openstack_ssh_key
+  image_name:
+    type: string
+    description: Name of image to use
+    # on rackspace, ubuntu does not work by default, you gotta install setuptools and
+    # create your own image
+    default: ready_ubuntu
+  puppet_repo:
+    type: string
+    description: name of repo to download
+    default: 'https://github.com/bodepd/puppet_openstack_builder'
+
+resources:
+#  extra_subnet:
+#    type: OS::Neutron::Subnet
+#    properties:
+#      name: extra_net
+#      cidr: "11.11.0.0/24"
+#      enable_dhcp: true
+#      # ip_version: Integer
+#      # network: String
+#      # tenant_id: String
+  openstack_controller:
+    type: OS::Nova::Server
+    properties:
+#      networks: [{"network": "extra_net"}]
+      name: Openstack Controller
+      flavor: 4 GB Performance
+      image: { get_param: image_name }
+      key_name: { get_param: key_name }
+      config_drive: "True"
+      user_data:
+        str_replace:
+          template: { get_file: heat_puppet_userdata.sh }
+          params:
+            $PUPPET_REPO: { get_param: puppet_repo }
+            # set the role and scenerio
+            $FACTS: 'role=controller;scenario=2_role'
+            # this is a magic variable
+            $USER_HIERA_YAML: { get_file: jenkins_server.yaml }
+            $PRE_PUPPET_CONFIG: |
+              git clone https://github.com/bodepd/scenario_node_terminus ~/scenario_node_terminus
+              export RUBYLIB=$RUBYLIB:~/scenario_node_terminus/lib
+            $PUPPET_OPTIONS: ' --node_terminus scenario'
+            $HIERA_DATA_DIR: /etc/puppet/data
+            $HIERA_USER_DATA_DIR: hiera_data
+            $CONNECTION_HIERA_OVERRIDES: |
+              controller_public_address: "%{ipaddress_eth0}"
+              controller_internal_address: "%{ipaddress_eth0}"
+              controller_admin_address: "%{ipaddress_eth0}"
+              controller_public_url: "http://%{ipaddress_eth0}:5000"
+              controller_admin_url: "http://%{ipaddress_eth0}:35357"
+              controller_internal_url: "http://%{ipaddress_eth0}:35357"
+              internal_ip: "%{ipaddress_eth1}"
+              #external_interface: eth1
+              # seeing if I can do without the external bridge
+              # b/c it requires 3 interfaces
+              # I need the bridge, but not the port (b/c it kills the interface)
+              neutron::agents::ml2::ovs::bridge_uplinks: []
+              openstack_extras::test_file::pre_ssh_cmd: 'ip addr add 172.16.2.130/24 broadcast 172.16.2.255 dev br-ex'
+              openstack_extras::test_file::sleep_time: 120
+              #neutron::agents::ml2::ovs::bridge_mappings: []
+              #external_interface: eth1
+              mysql::server::override_options:
+                mysqld:
+                  bind-address: "%{ipaddress_eth0}"
+                  max-connections: 8192
+                  max_connect_errors: 4294967295
+                isamchk:
+                  key_buffer_size: 64
+              enabled_services:
+                - glance
+                - cinder
+                - keystone
+                - nova
+                - neutron
+                - ceilometer
+
+  openstack_compute:
+    type: OS::Nova::Server
+    properties:
+      name: Openstack Compute Instance
+      flavor: 4 GB Performance
+      image: { get_param: image_name }
+      key_name: { get_param: key_name }
+      config_drive: "True"
+      user_data:
+        str_replace:
+          template: { get_file: heat_puppet_userdata.sh }
+          params:
+            $PUPPET_REPO: { get_param: puppet_repo }
+            # set the role and scenerio
+            $FACTS: 'role=compute;scenario=2_role'
+            # this is a magic variable
+            $USER_HIERA_YAML: { get_file: jenkins_server.yaml }
+            $PRE_PUPPET_CONFIG: |
+              git clone https://github.com/bodepd/scenario_node_terminus ~/scenario_node_terminus
+              export RUBYLIB=$RUBYLIB:~/scenario_node_terminus/lib
+            $PUPPET_OPTIONS: ' --node_terminus scenario'
+            $HIERA_DATA_DIR: /etc/puppet/data
+            $HIERA_USER_DATA_DIR: hiera_data
+            $CONNECTION_HIERA_OVERRIDES:
+              str_replace:
+                template: |
+                  controller_public_address: $CONTROLLER_PUBLIC
+                  controller_internal_address: $CONTROLLER_PUBLIC
+                  controller_admin_address: $CONTROLLER_PUBLIC
+                  controller_public_url: http://$CONTROLLER_PUBLIC:5000
+                  controller_admin_url: http://$CONTROLLER_PUBLIC:35357
+                  controller_internal_url: http://$CONTROLLER_PUBLIC:35357
+                  internal_ip: "%{ipaddress_eth1}"
+                  #external_interface: eth1
+                  # seeing if I can do without the external bridge
+                  # b/c it requires 3 interfaces
+                  neutron::agents::ml2::ovs::bridge_uplinks: []
+                  neutron::agents::ml2::ovs::bridge_mappings: []
+                  public_interface: eth0
+                  private_interface: eth0
+                  nova::compute::vncserver_proxyclient_address: "%{ipaddress_eth0}"
+                  enabled_services:
+                    - glance
+                    - cinder
+                    - keystone
+                    - nova
+                    - neutron
+                    - ceilometer
+                params:
+                  $CONTROLLER_PUBLIC: { get_attr: [ openstack_controller, accessIPv4 ] }
+
+outputs:
+  openstack_controller_public_ip:
+    description: public IP address of openstack controller
+    value: { get_attr: [openstack_controller, accessIPv4] }
+  openstack_compute_public_ip:
+    description: public IP of openstack compute
+    value: { get_attr: [openstack_compute, accessIPv4] }
