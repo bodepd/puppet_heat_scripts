@@ -37,6 +37,14 @@ librarian-puppet install --verbose
 PIP_GET_PIP_URL=https://bootstrap.pypa.io/get-pip.py;curl -O $PIP_GET_PIP_URL || wget $PIP_GET_PIP_URL;python get-pip.py
 easy_install --upgrade pip
 
+# allow this variable to be supplied from a heat str_replace param
+# or set it to a default
+if [ -z "$HIERA_DATA_DIR" ]; then
+  HIERA_DIR='/etc/puppet/hieradata'
+else
+  HIERA_DIR=$HIERA_DATA_DIR
+fi
+
 # setup hiera data
 # this template assumes that hiera data is stored in the data dir
 # and that hiera.yaml maps it's yaml datadir to that directory.
@@ -44,21 +52,23 @@ easy_install --upgrade pip
 # be customized for this project
 if [ -d $TMP_PATH/hiera ]; then
   cp $TMP_PATH/hiera/hiera.yaml /etc/puppet/hiera.yaml
-  mkdir -p /etc/puppet/hieradata
+  mkdir -p $HIERA_DIR
   if [ -d $TMP_PATH/hiera/data ]; then
-    cp -Rvf $TMP_PATH /etc/puppet/hiera/data/ /etc/puppet/hieradata
+    cp -Rvf $TMP_PATH/hiera/data/* $HIERA_DIR
   fi
   # write in the hiera file with our user hiera data (which should be used to store secrets)
-cat <<EOF > /etc/puppet/hieradata/user.yaml
+
+#
+# This extra hiera_data is a huge pain
+#
+cat <<EOF > $HIERA_DIR/$HIERA_USER_DATA_DIR/user.yaml
 $USER_HIERA_YAML
 EOF
 fi
 # write connection specific overrides
-cat <<EOF >> /etc/puppet/hieradata/user.yaml
+cat <<EOF >> $HIERA_DIR/$HIERA_USER_DATA_DIR/user.yaml
 $CONNECTION_HIERA_OVERRIDES
 EOF
-
-echo $VAR
 
 # export all facts specified in FACTS parameter
 for i in $(echo "$FACTS" | tr -d ' ' | tr ";" "\n")
@@ -66,4 +76,8 @@ do
   export FACTER_${i}
 done
 
-puppet apply $TMP_PATH/manifests/site.pp --modulepath=/etc/puppet/modules
+$PRE_PUPPET_CONFIG
+
+puppet apply $TMP_PATH/manifests/site.pp --modulepath=/etc/puppet/modules $PUPPET_OPTIONS
+
+$POST_PUPPET_CONFIG
